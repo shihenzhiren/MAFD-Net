@@ -1,96 +1,306 @@
-# SimKD
+# MAFD-Net
 
-Knowledge Distillation with the Reused Teacher Classifier (CVPR-2022) https://arxiv.org/abs/2203.14001
+**MAFD-Net: Efficient Intrusion Detection via Lightweight Convolutional Network with Multi-scale Attentive Feature Distillation**
 
-# Toolbox for KD research
+> Zhenhua Cheng, Hui Hu*, Wengting Zhou, Shihong Deng, Longkun Cui  
+> School of Information and Software Engineering, East China Jiaotong University  
+> *Corresponding author: 2528@ecjtu.edu.cn
 
-This repository aims to provide a compact and easy-to-use implementation of several representative knowledge distillation approaches on standard image classification tasks (e.g., CIFAR100, ImageNet). 
+---
 
-- Generally, these KD approaches include a **classification loss**, a **logit-level distillation loss**, and an additional **feature distillation loss**. For fair comparison and ease of tuning, *we fix the hyper-parameters for the first two loss terms as **one** throughout all experiments.* (`--cls 1 --div 1`)
+## Abstract
 
-- The following approaches are currently supported by this toolbox, covering vanilla KD, feature-map distillation/feature-embedding distillation, instance-level distillation/pairwise-level distillation:
-  - [x] [Vanilla KD](https://arxiv.org/abs/1503.02531), [FitNet](https://arxiv.org/abs/1412.6550) [ICLR-2015], [AT](https://arxiv.org/abs/1612.03928) [ICLR-2017], [SP](https://arxiv.org/abs/1612.03928) [CVPR-2019], [VID](https://openaccess.thecvf.com/content_CVPR_2019/papers/Ahn_Variational_Information_Distillation_for_Knowledge_Transfer_CVPR_2019_paper.pdf) [CVPR-2019]
-  - [x] [CRD](https://arxiv.org/abs/1910.10699) [ICLR-2020], [SRRL](https://openreview.net/forum?id=ZzwDy_wiWv) [ICLR-2021], [SemCKD](https://arxiv.org/abs/2012.03236) [AAAI-2021]
-  - [ ] KR [CVPR-2021]
-  - [x] [SimKD](https://arxiv.org/abs/2203.14001) [CVPR-2022] 
+Network intrusion detection (NID) is a foundational technology for ensuring network security. However, deploying lightweight yet high-precision intrusion detection models (IDS) on resource-constrained devices remains a significant challenge. To address this, we propose **MAFD-Net**, a lightweight intrusion detection model that enhances detection accuracy through two key innovations:
 
-- This toolbox is built on a [open-source benchmark](https://github.com/HobbitLong/RepDistiller) and our [previous repository](https://github.com/DefangChen/SemCKD). The implementation of more KD approaches can be found there.
+1. **Multi-Head Attention (MHA)** mechanism integrated into EfficientNet-B0's MBConv modules, replacing the original Squeeze-and-Excitation (SE) attention to capture both local and global feature dependencies simultaneously.
+2. **Multi-scale Attentive Feature Distillation (MAFD)**, which transfers intermediate layer features from the heavy teacher model (EfficientNet-B7) to the lightweight student model (MAFD-Net), bridging the performance gap while keeping model complexity low.
 
-- Computing Infrastructure:
-  - We use one NVIDIA GeForce RTX 2080Ti GPU for CIFAR-100 experiments. The PyTorch version is 1.0. We use four NVIDIA A40 GPUs for ImageNet experiments. The PyTorch version is 1.10.
-  - As for ImageNet, we use [DALI](https://github.com/NVIDIA/DALI) for data loading and pre-processing. 
+Experimental results show that MAFD-Net achieves **98.99%**, **78.32%**, and **99.66%** accuracy on NSL-KDD, UNSW-NB15, and QAX2024 datasets respectively, while reducing model parameters by **89%** compared to EfficientNet-B7.
 
-- The current codes have been reorganized and we have not tested them thoroughly. If you have any questions, please contact us without hesitation. 
+**Keywords:** Intrusion Detection, Deep Learning, Multi-Head Attention, Lightweight Model, EfficientNet, Knowledge Distillation
 
-- Please put the CIFAR-100 and ImageNet dataset in the `../data/`.
+---
 
-## Get the pretrained teacher models
+## Architecture Overview
 
-```bash
-# CIFAR-100
-python train_teacher.py --batch_size 64 --epochs 240 --dataset cifar100 --model resnet32x4 --learning_rate 0.05 --lr_decay_epochs 150,180,210 --weight_decay 5e-4 --trial 0 --gpu_id 0
-
-# ImageNet
-python train_teacher.py --batch_size 256 --epochs 120 --dataset imagenet --model ResNet18 --learning_rate 0.1 --lr_decay_epochs 30,60,90 --weight_decay 1e-4 --num_workers 32 --gpu_id 0,1,2,3 --dist-url tcp://127.0.0.1:23333 --multiprocessing-distributed --dali gpu --trial 0 
+```
+Network Traffic Data
+        ↓
+  Traffic-to-Image Conversion (16×16 PNG → resized to 64×64)
+        ↓
+┌─────────────────────────────────────────┐
+│              MAFD-Net (Student)         │
+│  EfficientNet-B0 + MHA-MBConv Modules   │
+│  (Stages 3,4,5 - middle layer replaced) │
+└─────────────────────────────────────────┘
+        ↑  Knowledge Distillation (MAFD)
+┌─────────────────────────────────────────┐
+│        EfficientNet-B7 (Teacher)        │
+│     Pre-trained on intrusion dataset    │
+└─────────────────────────────────────────┘
+        ↓
+  Attack Classification Output
 ```
 
-The pretrained teacher models used in our paper are provided in this link [[GoogleDrive]](https://drive.google.com/drive/folders/1j7b8TmftKIRC7ChUwAqVWPIocSiacvP4?usp=sharing). 
+### MAFD Distillation Pipeline
 
-## Train the student models with various KD approaches
+The MAFD framework consists of three collaborative modules:
+
+| Module | Description |
+|--------|-------------|
+| **Channel Adaptive Selection (CAS)** | Uses channel attention to filter noise and select informative feature channels from teacher features |
+| **Dynamic Layer Matching (DLM)** | Dynamically matches each teacher layer to the top-K most relevant student layers via attention scores |
+| **Multi-scale Feature Alignment & Distillation (MFAD)** | Projects aligned features into a unified embedding space and minimizes L2 distance for knowledge transfer |
+
+**Total Loss:**
+```
+L_total = α · L_CE + γ · L_MAFD
+```
+where α = 0.8, γ = 0.2 (classification loss weighted higher than distillation loss).
+
+---
+
+## Datasets
+
+This project is evaluated on three network intrusion detection datasets:
+
+### NSL-KDD
+A refined version of KDDCup99 with redundancies removed. **5-class classification** (Normal, DoS, Probe, R2L, U2R).
+
+| Split | Total | Normal | DoS | Probe | R2L | U2R |
+|-------|-------|--------|-----|-------|-----|-----|
+| Train | 118,886 | 61,643 | 42,780 | 11,262 | 2,999 | 202 |
+| Test  | 29,721  | 15,411 | 10,695 | 2,815 | 750  | 50  |
+
+Download: http://nsl.cs.unb.ca/NSL-KDD
+
+### UNSW-NB15
+A comprehensive benchmark with real network traffic. **10-class classification** (Normal + 9 attack types).
+
+| Split | Total | Normal | DoS | Backdoor | Exploits | Fuzzers | Generic | Recon | Shellcode | Worms |
+|-------|-------|--------|-----|----------|----------|---------|---------|-------|-----------|-------|
+| Train | 175,341 | 56,000 | 12,264 | 1,746 | 33,393 | 18,184 | 40,000 | 10,491 | 1,133 | 130 |
+| Test  | 82,332  | 37,000 | 4,089 | 583 | 11,132 | 6,062 | 18,871 | 3,496 | 378 | 44 |
+
+Download: https://www.unb.ca/cic/datasets/unsw-nb15.html
+
+### QAX2024 (Private)
+An enterprise-grade dataset with eight days of real network traffic, covering **81 attack categories** including CVEs for Apache Log4j2, Struts2, Shiro, etc. Train/Test split = 8:2. Due to confidentiality agreements, this dataset cannot be made publicly available.
+
+**Data Preprocessing:** Raw traffic features are encoded into **16×16 PNG images**, then resized to 64×64 for model input.
+
+Place datasets under `./data/` with the following structure:
+```
+data/
+├── unsw/
+│   ├── train_multi/{0.0, 1.0, ..., 9.0}/image_*.png
+│   └── test_multi/ {0.0, 1.0, ..., 9.0}/image_*.png
+├── nsl/
+│   ├── train/
+│   └── test/
+└── QAX2024/
+    ├── train/
+    └── test/
+```
+
+---
+
+## Installation
 
 ```bash
-# CIFAR-100
-python train_student.py --path_t ./save/teachers/models/resnet32x4_vanilla/resnet32x4_best.pth --distill simkd --model_s resnet8x4 -c 0 -d 0 -b 1 --trial 0
+# Clone the repository
+git clone https://github.com/shihenzhiren/MAFD-Net.git
+cd MAFD-Net
 
-# ImageNet
-python train_student.py --path-t './save/teachers/models/ResNet50_vanilla/ResNet50_best.pth' --batch_size 256 --epochs 120 --dataset imagenet --model_s ResNet18 --distill simkd -c 0 -d 0 -b 1 --learning_rate 0.1 --lr_decay_epochs 30,60,90 --weight_decay 1e-4 --num_workers 32 --gpu_id 0,1,2,3 --dist-url tcp://127.0.0.1:23444 --multiprocessing-distributed --dali gpu --trial 0 
+# Install dependencies
+pip install torch torchvision
+pip install tensorboard_logger
 ```
-More scripts are provided in `./scripts`
 
-## Some results on CIFAR-100
+**Computing Infrastructure:**
+- Training (Teacher): NVIDIA A100-PCIE-40GB
+- Testing / Student Training: NVIDIA GTX 1080 Ti
 
-|    | ResNet-8x4 | VGG-8 | ShuffleNetV2x1.5 |
-|  ----- | ----  | ----  | ---- |
-| **Student**| 73.09 | 70.46 | 74.15 |
-| KD     | 74.42 | 72.73 | 76.82 |
-| FitNet | 74.32 | 72.91 | 77.12 |
-| AT     | 75.07 | 71.90 | 77.51 |
-| SP     | 74.29 | 73.12 | 77.18 |
-| VID    | 74.55 | 73.19 | 77.11 |
-| CRD    | 75.59 | 73.54 | 77.66 |
-| SRRL   | 75.39 | 73.23 | 77.55 |
-| SemCKD | 76.23 | 75.27 | 79.13 |
-| SimKD (f=8) | **76.73** | 74.74 | 78.96|
-| SimKD (f=4) | **77.88** | **75.62** | **79.48**|
-| SimKD (f=2) | **78.08** | **75.76** | **79.54** |
-| **Teacher (ResNet-32x4)** | 79.42 | 79.42 | 79.42 |
+---
 
+## Training
 
-![result](./images/SimKD_result.png)
-<center>(Left) The cross-entropy loss between model predictions and test labels. <br />
-(Right) The top-1 test accuracy (%) (Student: ResNet-8x4, Teacher: ResNet-32x4). </center>
+### Step 1: Train the Teacher Model (EfficientNet-B7)
 
+```bash
+# UNSW-NB15
+python train_teacher.py \
+  --batch_size 64 --epochs 240 \
+  --dataset unsw \
+  --model efficientnet_b7 \
+  --learning_rate 0.05 \
+  --lr_decay_epochs 150,180,210 \
+  --weight_decay 5e-4 \
+  --trial 0 --gpu_id 0
+
+# NSL-KDD
+python train_teacher.py \
+  --batch_size 64 --epochs 240 \
+  --dataset nsl \
+  --model efficientnet_b7 \
+  --learning_rate 0.05 \
+  --lr_decay_epochs 150,180,210 \
+  --weight_decay 5e-4 \
+  --trial 0 --gpu_id 0
+```
+
+### Step 2: Train MAFD-Net (Student) with MAFD Distillation
+
+```bash
+# UNSW-NB15 - MAFD distillation
+python train_student.py \
+  --path_t ./save/teachers/models/efficientnet_b7_unsw/efficientnet_b7_best.pth \
+  --distill afd \
+  --dataset unsw \
+  --model_s efficientnet_b0 \
+  -c 1 -d 1 -b 1 \
+  --trial 0 --gpu_id 0
+
+# NSL-KDD - MAFD distillation
+python train_student.py \
+  --path_t ./save/teachers/models/efficientnet_b7_nsl/efficientnet_b7_best.pth \
+  --distill afd \
+  --dataset nsl \
+  --model_s efficientnet_b0 \
+  -c 1 -d 1 -b 1 \
+  --trial 0 --gpu_id 0
+```
+
+More training scripts are available in `./scripts/`.
+
+---
+
+## Supported Distillation Methods
+
+This codebase is built upon the [SimKD](https://github.com/DefangChen/SimKD) / [RepDistiller](https://github.com/HobbitLong/RepDistiller) toolbox and supports the following knowledge distillation methods for comparison:
+
+| Method | Reference |
+|--------|-----------|
+| **MAFD (Ours)** | This paper |
+| KD | Hinton et al., NeurIPS 2015 |
+| FitNet | Romero et al., ICLR 2015 |
+| AT | Zagoruyko & Komodakis, ICLR 2017 |
+| SP | Tung & Mori, CVPR 2019 |
+| VID | Ahn et al., CVPR 2019 |
+| CRD | Tian et al., ICLR 2020 |
+| SemCKD | Chen et al., AAAI 2021 |
+| SimKD | Chen et al., CVPR 2022 |
+
+---
+
+## Experimental Results
+
+### Ablation: MHA-MBConv Replacement Strategy (NSL-KDD / UNSW-NB15 / QAX2024)
+
+| Exp. | Stages | Position | Params (M) | FLOPs (G) | NSL-KDD Acc (%) | UNSW-NB15 Acc (%) | QAX2024 Acc (%) |
+|------|--------|----------|-----------|-----------|-----------------|-------------------|-----------------|
+| A0 (Baseline) | None | — | 4.00 | 0.28 | 97.81 | 76.55 | 95.39 |
+| A1 | [3] | Middle | 4.23 | 0.33 | 97.65 | 76.67 | 97.50 |
+| A2 | [3,4] | Middle | 5.13 | 0.40 | 97.78 | 76.73 | 96.51 |
+| **A3 (Ours)** | **[3,4,5]** | **Middle** | **6.90** | **0.51** | **97.94** | **77.02** | **96.86** |
+| A4 | [3,4,5,6] | Middle | 12.10 | 0.84 | 97.75 | 76.91 | 97.65 |
+
+> **A3 (stages 3,4,5 middle replacement) is adopted as the final MAFD-Net architecture.**
+
+### Distillation Method Comparison
+
+| Method | NSL-KDD Acc (%) | NSL-KDD F1 (%) | UNSW-NB15 Acc (%) | UNSW-NB15 F1 (%) | QAX2024 Acc (%) | QAX2024 F1 (%) |
+|--------|----------------|----------------|-------------------|------------------|-----------------|----------------|
+| Teacher (EfficientNet-B7) | 98.90 | 92.57 | 78.29 | 78.05 | 99.55 | 99.56 |
+| Student (no distill) | 97.94 | 97.82 | 77.02 | 76.86 | 96.86 | 96.83 |
+| KD | 98.58 | 91.55 | 77.23 | 77.06 | 98.63 | 98.64 |
+| CRD | 98.90 | 92.81 | 77.73 | 77.53 | 99.31 | 99.32 |
+| SimKD | 98.94 | 92.93 | 78.11 | 77.89 | 99.26 | 99.27 |
+| **MAFD (Ours)** | **98.99** | **94.13** | **78.32** | **78.14** | **99.66** | **99.66** |
+| MAFD w/o DLM | 98.73 | 92.37 | 78.03 | 78.02 | 99.05 | 99.06 |
+| MAFD w/o CAS | 98.54 | 92.22 | 78.01 | 77.78 | 99.11 | 99.14 |
+
+> MAFD achieves the best performance across all three datasets, with **89% parameter reduction** vs. the teacher model.
+
+### Comparison with State-of-the-Art (NSL-KDD & UNSW-NB15)
+
+| Method | NSL-KDD Acc (%) | NSL-KDD F1 (%) | UNSW-NB15 Acc (%) | UNSW-NB15 F1 (%) | Year | Preprocessing |
+|--------|----------------|----------------|-------------------|------------------|------|---------------|
+| RENOIR | 77.80 | 73.30 | 53.70 | 59.00 | 2021 | Raw traffic |
+| ROULETTE | 81.50 | 79.00 | 76.30 | 76.70 | 2022 | Traffic-to-image |
+| VINCENT | 82.90 | 81.80 | 78.40 | 78.10 | 2024 | Traffic-to-image |
+| KD-TCNN | 98.20 | 86.63 | — | — | 2022 | Raw traffic |
+| LNet-SKD | 98.66 | 89.03 | — | — | 2023 | Traffic-to-image |
+| **MAFD-Net (Ours)** | **98.99** | **94.13** | **78.32** | **78.14** | **2025** | **Traffic-to-image** |
+
+---
+
+## Project Structure
+
+```
+MAFD-Net/
+├── train_teacher.py          # Teacher model training script
+├── train_student.py          # Student model training with KD
+├── bohb_search.py            # Hyperparameter search (BOHB)
+├── results_visualization.py  # Visualize training results
+├── models/
+│   ├── efficientnet.py       # EfficientNet student (MAFD-Net w/ MHA-MBConv)
+│   ├── efficientnet_T.py     # EfficientNet teacher (B7)
+│   ├── mobilenetv2.py
+│   ├── resnet.py
+│   ├── ShuffleNetv2.py
+│   ├── vgg.py
+│   └── util.py               # ConvReg, SRRL, SimKD, SelfA utilities
+├── distiller_zoo/
+│   ├── AFD.py                # Attentive Feature Distillation (MAFD core)
+│   ├── AFD_improved.py       # Improved AFD variant
+│   ├── KD.py                 # Vanilla Knowledge Distillation
+│   ├── FitNet.py             # Hint-based distillation
+│   ├── AT.py                 # Attention Transfer
+│   ├── SP.py                 # Similarity Preserving
+│   ├── VID.py                # Variational Information Distillation
+│   └── SemCKD.py             # Semantic Calibration KD
+├── dataset/
+│   ├── unsw.py               # UNSW-NB15 dataloader (16×16 image format)
+│   ├── QAX2024.py            # QAX2024 enterprise dataset loader
+│   ├── cifar100.py           # CIFAR-100 (baseline reference)
+│   └── imagenet.py           # ImageNet dataloader
+├── helper/
+│   ├── loops.py              # Training / validation loops
+│   ├── util.py               # Learning rate scheduling, utilities
+│   └── meters.py             # AverageMeter for logging
+└── scripts/
+    ├── run_vanilla.sh         # Train vanilla teacher/student models
+    └── run_distill.sh         # Run various KD experiments
+```
+
+---
+
+## Funding & Acknowledgements
+
+This work was supported by the **National Natural Science Foundation of China (NSFC)** under Grant **61961020**.
+
+---
 
 ## Citation
-If you find this repository useful, please consider citing the following paper:
 
+If you find this repository useful, please cite our paper:
 
-```
-@inproceedings{chen2022simkd,
-  title={Knowledge Distillation with the Reused Teacher Classifier},
-  author={Chen, Defang and Mei, Jian-Ping and Zhang, Hailin and Wang, Can and Feng, Yan and Chen, Chun},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  pages={11933--11942},
-  year={2022}
-}
-```
-```
-@inproceedings{chen2021cross,
-  author    = {Defang Chen and Jian{-}Ping Mei and Yuan Zhang and Can Wang and Zhe Wang and Yan Feng and Chun Chen},
-  title     = {Cross-Layer Distillation with Semantic Calibration},
-  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
-  pages     = {7028--7036},
-  year      = {2021},
+```bibtex
+@article{cheng2025mafdnet,
+  title     = {MAFD-Net: Efficient Intrusion Detection via Lightweight Convolutional Network 
+               with Multi-scale Attentive Feature Distillation},
+  author    = {Cheng, Zhenhua and Hu, Hui and Zhou, Wengting and Deng, Shihong and Cui, Longkun},
+  journal   = {--},
+  year      = {2025},
+  note      = {School of Information and Software Engineering, East China Jiaotong University}
 }
 ```
 
+This codebase is built upon the [SimKD](https://github.com/DefangChen/SimKD) toolbox and the [RepDistiller](https://github.com/HobbitLong/RepDistiller) benchmark. We sincerely thank the original authors for their open-source contributions.
+
+---
+
+## License
+
+This project is for academic research purposes. The QAX2024 dataset is proprietary and cannot be redistributed. The NSL-KDD and UNSW-NB15 datasets are publicly available at their respective official links.
